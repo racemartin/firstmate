@@ -104,8 +104,9 @@
 #   profile consultation. A --secondmate spawn is exempt and resolves the SECONDMATE
 #   harness (config/secondmate-harness -> config/crew-harness -> own), so the
 #   secondmate-vs-crewmate split is DURABLE across every respawn (recovery,
-#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|muse)
-#   overrides it for this spawn (either kind). A non-flag string containing
+#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|muse|hermes)
+#   overrides it for this spawn (either kind, though muse and hermes are both
+#   refused for --secondmate below). A non-flag string containing
 #   whitespace is treated as a RAW launch command - the escape hatch for verifying
 #   new adapters. For pi and pi-signed, fm-spawn resolves the selected executable
 #   name from PATH once, probes that concrete path with --help, and launches the
@@ -1046,7 +1047,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
 elif [ "$KIND" = secondmate ]; then
   case "${POS[1]:-}" in
-    ''|claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|muse)
+    ''|claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|muse|hermes)
       ARG3=${POS[1]:-}
       ;;
     *' '*)
@@ -1154,6 +1155,25 @@ launch_template() {
     # Its turn-end signal is a globally configured Stop hook plus a guarded
     # per-task worktree token, so no launch placeholder belongs here.
     kimi) printf '%s' '__KIMIBIN__ __MODELFLAG__--auto' ;;
+    # Hermes Agent's `chat` subcommand also rejects a positional prompt (its
+    # -q/--query flag is documented as single-query non-interactive mode, not
+    # a supervised session starter), so like Kimi it launches bare and
+    # receives only an absolute brief pointer after the TUI readiness gate
+    # below. --yolo bypasses every dangerous-command approval prompt
+    # (verified: the banner shows "YOLO mode - all approval prompts
+    # bypassed" and a shell tool call ran with no confirmation). --accept-hooks
+    # auto-approves any unseen shell hook declared in config.yaml instead of
+    # blocking on a TTY prompt; this worktree declares none, so it is
+    # defensive rather than load-bearing today. No first-run trust/workspace
+    # dialog was observed even in a brand-new never-seen directory (verified
+    # 0.20.0), so unlike claude/codex/pi/grok/muse/cursor there is no dialog
+    # for fm-spawn to handle after launch. Hermes's own -w/--worktree flag is
+    # never passed: like cursor's -w it allocates a SECOND git worktree
+    # rather than using the one fm-spawn already prepared. Hermes's turn-end
+    # signal rides neither the launch command nor a hook: it has no plugin
+    # engine at all, so firstmate folds hermes's own shared state.db instead
+    # (bin/fm-busy-lib.sh), bound by the sidecar written below.
+    hermes) printf '%s' 'hermes chat --yolo --accept-hooks __MODELFLAG____EFFORTFLAG__' ;;
     # muse (Muse Code): a positional prompt starts the supervised interactive
     # session. --yolo is the single flag that makes a crewmate pane viable: muse
     # ships approval prompts AND a filesystem/network sandbox ON by default
@@ -1174,7 +1194,7 @@ launch_template() {
     # plugin engine is off in the default build, so firstmate folds muse's own
     # session event log instead (bin/fm-busy-lib.sh), bound by the sidecar
     # written below. Nothing to place in the template for it.
-    # codex, opencode, and kimi are also markerless and share this inherited-marker hazard; changing their verified launch boundaries belongs in follow-up work.
+    # codex, opencode, kimi, and hermes are also markerless and share this inherited-marker hazard; changing their verified launch boundaries belongs in follow-up work.
     muse) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS XDG_CONFIG_HOME=__MUSECONFIG__ XDG_DATA_HOME=__MUSEDATA__ MUSE_EXPERIMENTAL_FOREIGN_PERSONAL_CONTEXT_KILL=on __MUSEBIN__ --yolo __MODELFLAG____EFFORTFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
     *) return 1 ;;
   esac
@@ -1224,6 +1244,19 @@ esac
 # secondmate whose supervision cycle could never be armed.
 if [ "$KIND" = secondmate ] && [ "$HARNESS" = muse ]; then
   echo "error: muse is a verified crewmate/scout adapter only and cannot run a secondmate; it has no primary supervision protocol. Select a harness verified for secondmates." >&2
+  exit 1
+fi
+
+# hermes is verified as a CREWMATE/SCOUT adapter only, for the same reason as
+# muse above: this verification investigated hermes's spawn mechanics,
+# composer shape, and busy-state fold, but did not investigate or build a
+# primary watcher/turn-end supervision protocol for it (no
+# docs/supervision-protocols/hermes.md, no Stop-hook-equivalent wiring). A
+# secondmate is a firstmate PRIMARY instance and needs that protocol to be
+# supervised at all, so refusing here keeps the gap loud instead of standing
+# up a secondmate whose supervision cycle could never be armed.
+if [ "$KIND" = secondmate ] && [ "$HARNESS" = hermes ]; then
+  echo "error: hermes is a verified crewmate/scout adapter only and cannot run a secondmate; it has no primary supervision protocol. Select a harness verified for secondmates." >&2
   exit 1
 fi
 
@@ -1361,7 +1394,7 @@ model_flag_for_harness() {
   local harness=$1 model=$2
   [ -n "$model" ] && [ "$model" != default ] || return 0
   case "$harness" in
-    claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|muse)
+    claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|muse|hermes)
       printf -- '--model %s ' "$(shell_quote "$model")"
       ;;
   esac
@@ -1412,6 +1445,23 @@ effort_flag_for_harness() {
       case "$effort" in
         low|medium|high|xhigh) printf -- '--reasoning-effort %s ' "$(shell_quote "$effort")" ;;
         max) printf -- '--reasoning-effort %s ' "$(shell_quote ultra)" ;;
+      esac
+      ;;
+    hermes)
+      # Verified 0.20.0: --reasoning LEVEL's documented vocabulary is none,
+      # minimal, low, medium, high, xhigh, max, or ultra - firstmate's shared
+      # low/medium/high/xhigh vocabulary maps straight across BY NAME, and
+      # unlike muse, hermes has its own literal "max" level so firstmate's
+      # max needs no remapping onto "ultra". "ultra" sits one level above
+      # firstmate's max and is deliberately unreachable from this axis, the
+      # same reasoning muse uses for its own sub-low levels. The CLI does
+      # NOT validate this value client-side (an invalid string was passed
+      # through unrejected in the same probe that confirmed a genuine
+      # provider 404 for an invalid --model), so effect depends entirely on
+      # whether the selected model honors reasoning effort; firstmate still
+      # only ever emits values from its own accepted vocabulary.
+      case "$effort" in
+        low|medium|high|xhigh|max) printf -- '--reasoning %s ' "$(shell_quote "$effort")" ;;
       esac
       ;;
     # opencode's interactive `opencode --prompt` launch has a verified --model
@@ -2194,6 +2244,80 @@ kimi_spawn_fail() {  # <detail>
   echo "error: $1; inspect window $T" >&2
 }
 
+hermes_capture() {
+  fm_backend_capture "$BACKEND" "$T" 120 "$W" 2>/dev/null || true
+}
+
+# Hermes launch-readiness and delivery route their composer-emptiness half
+# through the same shared classifier kimi uses above (bin/fm-composer-lib.sh
+# via fm_backend_composer_state), never a spawn-local copy. The banner and
+# brief-echo greps below are launch-progress signals, not composer shapes.
+hermes_composer_is_empty() {
+  [ "$(fm_backend_composer_state "$BACKEND" "$T" "$W" 2>/dev/null)" = empty ]
+}
+
+hermes_wait_for_ready() {
+  local i=0 max=${FM_HERMES_READY_POLLS:-60} interval=${FM_HERMES_POLL_INTERVAL:-0.5}
+  # Composer-empty ALONE is the gate, deliberately not ORed with the
+  # "Welcome to Hermes Agent!" banner text. Verified live (0.20.0, frame-by-
+  # frame captures at a 0.3s interval): the banner text renders roughly 1.2s
+  # BEFORE the composer/status-bar frame does. A pointer typed during that
+  # window is silently lost - it lands as stray scrollback text rather than
+  # composer content, Enter submits nothing, and no session row is ever
+  # written to state.db. This is a distinct failure mode from Kimi's own
+  # first-Enter readiness hazard (which drops a swallowed Enter, not the
+  # typed text itself, and is covered by the shared submit core's retry), so
+  # the fix here is to wait for genuine composer readiness rather than to
+  # retry after an early send.
+  while [ "$i" -lt "$max" ]; do
+    hermes_composer_is_empty && return 0
+    i=$((i + 1))
+    [ "$i" -ge "$max" ] || sleep "$interval"
+  done
+  return 1
+}
+
+# hermes_delivery_is_confirmed: verified live (0.20.0), three independent
+# signals. hermes draws an extra hint row inside its composer frame for the
+# whole turn ("msg=interrupt · /queue · /bg · /steer · Ctrl+C cancel"), so a
+# still-running turn is positive proof of delivery on its own - checked
+# FIRST because it is the common case (a real model call rarely finishes
+# before the next poll). For a turn that already finished by the time this
+# polls: a submitted message is echoed into the transcript on its own line
+# prefixed with "●" (e.g. "● hello test message"), and the idle status bar's
+# token counter moves from its pre-first-turn "ctx --" baseline to a
+# "N/<window>" digit pattern once the first turn has actually started;
+# either combined with the composer returning to empty is confirmation, with
+# ctx growth as the fallback for the rare case the echoed line has already
+# scrolled past the captured pane height.
+hermes_delivery_is_confirmed() {  # <plain-pane-capture>
+  local pane=$1
+  printf '%s\n' "$pane" | grep -qiE 'Ctrl\+C[[:space:]]cancel' && return 0
+  hermes_composer_is_empty || return 1
+  if { printf '%s\n' "$pane" | grep -Fq '●' \
+       && printf '%s\n' "$pane" | grep -Fq 'Read the brief at'; } \
+     || printf '%s\n' "$pane" | grep -qE '[0-9](\.[0-9]+)?K?/[0-9]+(\.[0-9]+)?K'; then
+    return 0
+  fi
+  return 1
+}
+
+hermes_wait_for_delivery() {
+  local pane i=0 max=${FM_HERMES_DELIVERY_POLLS:-40} interval=${FM_HERMES_POLL_INTERVAL:-0.5}
+  while [ "$i" -lt "$max" ]; do
+    pane=$(hermes_capture)
+    hermes_delivery_is_confirmed "$pane" && return 0
+    i=$((i + 1))
+    [ "$i" -ge "$max" ] || sleep "$interval"
+  done
+  return 1
+}
+
+hermes_spawn_fail() {  # <detail>
+  printf 'failed: %s\n' "$1" >> "$STATE/$ID.status"
+  echo "error: $1; inspect window $T" >&2
+}
+
 if [ "$RELAUNCH" -eq 1 ]; then
   # No worktree is acquired: the recorded one is reused as-is. What must be
   # proven instead is that the adopted endpoint's shell is actually sitting in
@@ -2556,6 +2680,33 @@ EOF
         fi
       } > "$STATE/$ID.cursor-session"
       ;;
+    hermes*)
+      # Hermes's turn lifecycle is neither a hook nor a launch flag: it
+      # writes every session's turns into ONE shared SQLite database and
+      # brackets every turn there (bin/fm-busy-lib.sh owns the fold). Like
+      # muse and cursor that is a PULL source with no writer, so nothing is
+      # armed and no record is seeded. This sidecar is the whole binding: it
+      # pins the resolved database path and this pane's exact launch
+      # directory, plus every session id hermes's shared sessions table
+      # already recorded for that directory, so a relaunch into a reused
+      # worktree pool slot folds its OWN session instead of a predecessor
+      # pane's. The classifier then accepts only one remaining session and
+      # never guesses between incarnations. fm-spawn does not override
+      # HERMES_HOME for the launch (hermes shares one credential/state home
+      # across concurrent panes the same way claude and codex already do),
+      # so the resolved path here is the exact one the launched pane itself
+      # will write to.
+      HERMES_DB="${HERMES_HOME:-$HOME/.hermes}/state.db"
+      {
+        printf 'db_path=%s\n' "$HERMES_DB"
+        printf 'workspace_root=%s\n' "$WT"
+        while IFS= read -r HERMES_PRIOR_SESSION; do
+          [ -n "$HERMES_PRIOR_SESSION" ] && printf 'prior_session=%s\n' "$HERMES_PRIOR_SESSION"
+        done <<EOF
+$(fm_busy_hermes_matching_sessions "$HERMES_DB" "$WT" || true)
+EOF
+      } > "$STATE/$ID.hermes-session"
+      ;;
     kimi*)
       # Kimi's Stop hook is global, but it is inert unless cwd contains this
       # task's token pointer and the token resolves through Firstmate's private
@@ -2834,6 +2985,30 @@ if [ "$HARNESS" = kimi ]; then
   fi
   if ! kimi_wait_for_delivery; then
     kimi_spawn_fail "kimi brief pointer delivery was not confirmed"
+    exit 1
+  fi
+fi
+if [ "$HARNESS" = hermes ]; then
+  if ! hermes_wait_for_ready; then
+    hermes_spawn_fail "hermes did not show a verified ready signal before brief delivery"
+    exit 1
+  fi
+  HERMES_POINTER="Read the brief at $BRIEF_REAL and follow it exactly."
+  HERMES_SUBMIT_RETRIES=${FM_HERMES_SUBMIT_RETRIES:-3}
+  HERMES_SUBMIT_SLEEP=${FM_HERMES_SUBMIT_SLEEP:-${FM_HERMES_POLL_INTERVAL:-0.5}}
+  HERMES_SUBMIT_SETTLE=${FM_HERMES_SUBMIT_SETTLE:-0}
+  HERMES_SUBMIT_VERDICT=$(fm_backend_send_text_submit \
+    "$BACKEND" "$T" "$HERMES_POINTER" "$HERMES_SUBMIT_RETRIES" \
+    "$HERMES_SUBMIT_SLEEP" "$HERMES_SUBMIT_SETTLE" "$W") || {
+    hermes_spawn_fail "hermes brief pointer could not be submitted"
+    exit 1
+  }
+  if [ "$HERMES_SUBMIT_VERDICT" = send-failed ]; then
+    hermes_spawn_fail "hermes brief pointer could not be submitted"
+    exit 1
+  fi
+  if ! hermes_wait_for_delivery; then
+    hermes_spawn_fail "hermes brief pointer delivery was not confirmed"
     exit 1
   fi
 fi

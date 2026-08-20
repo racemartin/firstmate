@@ -170,7 +170,20 @@ fm_backend_tmux_classify_process_name() {  # <path> [argv0] -> agent|shell|other
     # cannot carry it either: ~/.local/bin/muse-bin-<version> has no `muse` path
     # COMPONENT, so the fm_harness_path_name fallback below never fires for it.
     muse|muse-bin-*) printf 'agent' ;;
-    *claude*|*codex*|*opencode*|*grok*|*kimi*|pi|pi-signed|pi-launcher|Pi) printf 'agent' ;;
+    # hermes (Hermes Agent) is the OPPOSITE case from cursor below: its kernel
+    # process name IS reliable, tmux's own field is what is not. Hermes runs
+    # as `<venv>/bin/python <install>/hermes ...`, so #{pane_current_command}
+    # (fm_backend_tmux_current_command) reports the generic `python` - matched
+    # by no pattern here, deliberately, since a bare `python` is far too
+    # generic to ever mean "agent alive" on its own (the same trap cursor's
+    # bare `node` falls into). `ps -o comm=`
+    # (fm_backend_tmux_foreground_comms) instead reports the exact renamed
+    # value `hermes` (verified live via /proc/<pid>/comm on hermes 0.20.0,
+    # matching a process self-rename rather than argv[0] or the exe path),
+    # and that ps-comm signal is checked FIRST in fm_backend_tmux_agent_state
+    # below, so this pattern alone is sufficient - no structural fallback
+    # like cursor's is needed.
+    *claude*|*codex*|*opencode*|*grok*|*kimi*|*hermes*|pi|pi-signed|pi-launcher|Pi) printf 'agent' ;;
     zsh|bash|sh|dash|ash|ksh|mksh|tcsh|csh|fish) printf 'shell' ;;
     *)
       if fm_harness_path_name "$path" >/dev/null || fm_harness_path_name "$argv0" >/dev/null; then

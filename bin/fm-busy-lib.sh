@@ -40,8 +40,9 @@
 #   fm-recovery      a documented recovery reset after relaunch
 # Classifier-only sources (never written into a record):
 #   endpoint-gone, herdr-native, grok-regex, muse-session-log,
-#   cursor-transcript, missing, malformed, gen-mismatch, source-mismatch,
-#   kimi-unverified, codex-unverified, capture-failed, no-target
+#   cursor-transcript, hermes-state-db, missing, malformed, gen-mismatch,
+#   source-mismatch, kimi-unverified, codex-unverified, capture-failed,
+#   no-target
 #
 # Classification (fm_busy_classify): busy | idle | unknown | dead, always
 # with the producing source as the second token. Precedence:
@@ -75,6 +76,12 @@
 # no writer, no arm, and no gen, so nothing is seeded that could never be
 # cleared. See fm_busy_cursor_turn_state for the fold. Cursor's rendered
 # `ctrl+c to stop` footer is deliberately not a state source here.
+#
+# The hermes pull source works the same way, folding hermes's own shared
+# state.db instead of a per-session file: no writer, no arm, no gen. See
+# "hermes shared state.db busy source" below for the schema and the
+# interrupt-path finding that makes the fold key on "not tool_calls" rather
+# than on finish_reason="stop" specifically.
 #
 # Codex negotiation (fm_busy_codex_appserver_observable,
 # fm_busy_codex_hooks_verified): the approved contract prefers Codex's
@@ -822,6 +829,128 @@ fm_busy_cursor_turn_state() {  # <transcript>
   '
 }
 
+# hermes shared state.db busy source
+#
+# Hermes Agent (verified 0.20.0) persists every session's turn history into
+# ONE shared SQLite database at ${HERMES_HOME:-$HOME/.hermes}/state.db (WAL
+# journal mode, confirmed live via `hermes doctor`), not a per-session file
+# like muse or cursor. `sessions.cwd` records the launch directory and
+# `messages.session_id` scopes every row, so a single pane is folded by
+# filtering on its own session_id rather than by a distinct file path.
+# Verified live turn shape (session 20260820_151618_e5dc91, hermes 0.20.0):
+#   role=user                                    <- turn opens
+#   role=assistant finish_reason=tool_calls       <- tool call requested (open)
+#   role=tool                                     <- tool result (still open)
+#   role=assistant finish_reason=stop             <- normal completion (close)
+# A Ctrl+C interrupt was also verified live: it inserts role=tool with
+# content "[Command interrupted]" followed by role=assistant whose
+# finish_reason is NULL (not "stop"), so the fold below treats ANY trailing
+# assistant row without finish_reason=tool_calls as closed - the same
+# "closed unless a continuation is pending" reasoning as cursor's transcript
+# fold - rather than keying specifically on "stop". A resolved session with
+# zero messages (no turn ever submitted) reports "none", which classify()
+# below treats as unknown rather than idle, matching muse's own "no run yet"
+# convention: unconfirmed state is never assumed idle.
+#
+# Nothing is armed and no record is ever seeded: like muse and cursor, this
+# is a PULL source hermes writes with no firstmate hook or plugin involved,
+# so classification reads the shared database directly.
+fm_busy_hermes_binding_path() {  # <state-dir> <id>
+  printf '%s/%s.hermes-session' "$1" "$2"
+}
+
+fm_busy_hermes_binding_field() {  # <state-dir> <id> <key>
+  local path value
+  path=$(fm_busy_hermes_binding_path "$1" "$2")
+  [ -f "$path" ] || return 1
+  value=$(LC_ALL=C awk -F= -v k="$3" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$path")
+  [ -n "$value" ] || return 1
+  printf '%s' "$value"
+}
+
+# fm_busy_hermes_matching_sessions: every session id in hermes's shared
+# state.db whose recorded cwd is exactly <workspace-root>, one per line.
+# Exact match only, the same reasoning as cursor's .workspace-trusted
+# comparison: a prefix match would bind a nested worktree to its parent.
+# A missing python3 interpreter or an unreadable/locked database is a
+# resolution failure, never an empty-list guess.
+fm_busy_hermes_matching_sessions() {  # <db-path> <workspace-root>
+  local db=$1 workspace=$2
+  [ -f "$db" ] || return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$db" "$workspace" <<'PYEOF'
+import sqlite3
+import sys
+
+db, workspace = sys.argv[1], sys.argv[2]
+try:
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+    for row in con.execute("SELECT id FROM sessions WHERE cwd = ?", (workspace,)):
+        print(row[0])
+except sqlite3.Error:
+    sys.exit(1)
+PYEOF
+}
+
+# fm_busy_hermes_session_id: the ONE session this pane owns, or failure.
+# A session recorded as prior_session in the sidecar already existed for
+# this workspace path before this pane launched (a reused treehouse pool
+# slot), so it is excluded; requiring a UNIQUE remaining session is the same
+# uniqueness reasoning muse and cursor already use to avoid guessing between
+# incarnations.
+fm_busy_hermes_session_id() {  # <state-dir> <id>
+  local db workspace prior found='' count=0 sid
+  db=$(fm_busy_hermes_binding_field "$1" "$2" db_path) || return 1
+  workspace=$(fm_busy_hermes_binding_field "$1" "$2" workspace_root) || return 1
+  prior=$(LC_ALL=C awk -F= '$1 == "prior_session" { sub(/^[^=]*=/, ""); print }' \
+    "$(fm_busy_hermes_binding_path "$1" "$2")" 2>/dev/null)
+  while IFS= read -r sid; do
+    [ -n "$sid" ] || continue
+    printf '%s\n' "$prior" | grep -Fqx "$sid" && continue
+    found=$sid
+    count=$((count + 1))
+  done <<EOF
+$(fm_busy_hermes_matching_sessions "$db" "$workspace" || true)
+EOF
+  [ "$count" = 1 ] && [ -n "$found" ] || return 1
+  printf '%s' "$found"
+}
+
+# fm_busy_hermes_turn_state: fold the shared messages table for one
+# session_id into busy | settled | none | malformed. "none" means the
+# session is bound but no turn has ever been submitted to it.
+fm_busy_hermes_turn_state() {  # <db-path> <session-id>
+  local db=$1 sid=$2
+  [ -f "$db" ] || return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$db" "$sid" <<'PYEOF'
+import sqlite3
+import sys
+
+db, sid = sys.argv[1], sys.argv[2]
+try:
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+    row = con.execute(
+        "SELECT role, finish_reason FROM messages WHERE session_id = ? "
+        "ORDER BY id DESC LIMIT 1",
+        (sid,),
+    ).fetchone()
+except sqlite3.Error:
+    sys.exit(1)
+
+if row is None:
+    print("none")
+elif row[0] in ("user", "tool"):
+    print("busy")
+elif row[0] == "assistant" and row[1] == "tool_calls":
+    print("busy")
+elif row[0] == "assistant":
+    print("settled")
+else:
+    print("malformed")
+PYEOF
+}
+
 # fm_busy_grok_tail_busy: the Grok-only temporary rendered-tail fallback.
 # Consumes the tail on stdin; 0 when Grok's verified busy signature matches.
 # FM_BUSY_REGEX still globally overrides the signature, mirroring the
@@ -839,7 +968,7 @@ fm_busy_grok_tail_busy() {
 # if available, else reports unknown capture-failed.
 fm_busy_classify() {  # <backend> <target> <harness> <id> <state-dir> [tail40]
   local backend=$1 target=$2 harness=$3 id=$4 state=$5 tail40=${6-}
-  local out rc r_state r_source native log
+  local out rc r_state r_source native log sid hdb
   case "$harness" in
     kimi*)
       if ! fm_busy_kimi_verified; then
@@ -915,6 +1044,28 @@ fm_busy_classify() {  # <backend> <target> <harness> <id> <state-dir> [tail40]
         busy) printf 'busy muse-session-log' ;;
         settled) printf 'idle muse-session-log' ;;
         *) printf 'unknown muse-session-log' ;;
+      esac
+      return 0
+      ;;
+    hermes*)
+      # Semantic, on demand: fold this task's bound session_id in hermes's
+      # own shared state.db. A trailing user/tool row, or an assistant row
+      # still requesting a tool call, is positive proof of a turn in flight;
+      # any other trailing assistant row is a finished turn. Every other
+      # outcome - no sidecar, no resolvable session, an unreadable database,
+      # or a session with no messages yet - is unknown, never idle.
+      if ! sid=$(fm_busy_hermes_session_id "$state" "$id"); then
+        printf 'unknown hermes-state-db'
+        return 0
+      fi
+      if ! hdb=$(fm_busy_hermes_binding_field "$state" "$id" db_path); then
+        printf 'unknown hermes-state-db'
+        return 0
+      fi
+      case "$(fm_busy_hermes_turn_state "$hdb" "$sid" 2>/dev/null)" in
+        busy) printf 'busy hermes-state-db' ;;
+        settled) printf 'idle hermes-state-db' ;;
+        *) printf 'unknown hermes-state-db' ;;
       esac
       return 0
       ;;
