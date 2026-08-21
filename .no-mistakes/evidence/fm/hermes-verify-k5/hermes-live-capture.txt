@@ -1,0 +1,107 @@
+=== capture 1: just after launch (banner/first-run) ===
+│                                       more                                   │
+│  step-3.7-flash:free · Nous Research  devops: sdlc-review                    │
+│  ⚠ YOLO mode — all approval prompts   email: email-inbox-triage, himalaya    │
+│               bypassed                github: codebase-inspection, +6 more   │
+│          /tmp/tmp.pCjabKMFAR          media: gif-search, songsee, +1 more    │
+│    Session: 20260821_124458_fca135    mlops: evaluating-llms-harness, +4     │
+│                                       more                                   │
+│                                       note-taking: obsidian                  │
+│                                       productivity: airtable, +16 more       │
+│                                       research: arxiv, blogwatcher, +4 more  │
+│                                       smart-home: openhue                    │
+│                                       social-media: xurl                     │
+│                                       software-development:                  │
+│                                       agent-terminal-workspace-setup, +12    │
+│                                       more                                   │
+│                                                                              │
+│                                       28 tools · 82 skills · /help for       │
+│                                       commands                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Welcome to Hermes Agent! Type your message or /help for commands.
+✦ Tip: hermes dashboard launches a local web UI at 127.0.0.1:9119 — zero data
+leaves localhost.
+
+
+=== capture 2: idle composer (ready for input) ===
+│          /tmp/tmp.pCjabKMFAR          media: gif-search, songsee, +1 more    │
+│    Session: 20260821_124458_fca135    mlops: evaluating-llms-harness, +4     │
+│                                       more                                   │
+│                                       note-taking: obsidian                  │
+│                                       productivity: airtable, +16 more       │
+│                                       research: arxiv, blogwatcher, +4 more  │
+│                                       smart-home: openhue                    │
+│                                       social-media: xurl                     │
+│                                       software-development:                  │
+│                                       agent-terminal-workspace-setup, +12    │
+│                                       more                                   │
+│                                                                              │
+│                                       28 tools · 82 skills · /help for       │
+│                                       commands                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Welcome to Hermes Agent! Type your message or /help for commands.
+✦ Tip: hermes dashboard launches a local web UI at 127.0.0.1:9119 — zero data
+leaves localhost.
+
+ ⚕ step-3.7-flash:free │ ctx -- │ [░░░░░░░░░░] -- │ 2s │ ⏲ 0s │ ⚠ YOLO
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+
+=== capture 3: mid-response / busy ===
+│                                       research: arxiv, blogwatcher, +4 more  │
+│                                       smart-home: openhue                    │
+│                                       social-media: xurl                     │
+│                                       software-development:                  │
+│                                       agent-terminal-workspace-setup, +12    │
+│                                       more                                   │
+│                                                                              │
+│                                       28 tools · 82 skills · /help for       │
+│                                       commands                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Welcome to Hermes Agent! Type your message or /help for commands.
+✦ Tip: hermes dashboard launches a local web UI at 127.0.0.1:9119 — zero data
+leaves localhost.
+
+
+────────────────────────────────────────
+● Run: sleep 4 && echo evidence-turn-done. Then report the result.
+Initializing agent...
+
+ ⚕ step-3.7-flash:free │ ctx -- │ [░░░░░░░░░░] -- │ 4s │ ⏲ 0s │ ⚠ YOLO
+────────────────────────────────────────────────────────────────────────────────
+⚕ ❯ msg=interrupt · /queue · /bg · /steer · Ctrl+C cancel
+────────────────────────────────────────────────────────────────────────────────
+
+=== process identity: pane_current_command, foreground pgrp comm, argv[0] ===
+pane_current_command: python
+foreground child pid: 
+
+=== capture 4: back to idle after turn completes ===
+│                                       software-development:                  │
+│                                       agent-terminal-workspace-setup, +12    │
+│                                       more                                   │
+│                                                                              │
+│                                       28 tools · 82 skills · /help for       │
+│                                       commands                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Welcome to Hermes Agent! Type your message or /help for commands.
+✦ Tip: hermes dashboard launches a local web UI at 127.0.0.1:9119 — zero data
+leaves localhost.
+
+
+────────────────────────────────────────
+● Run: sleep 4 && echo evidence-turn-done. Then report the result.
+Initializing agent...
+
+────────────────────────────────────────
+  ಠ_ಠ brainstorming...
+
+ ⚕ step-3.7-flash:free │ 0/262.1K │ [░░░░░░░░░░] 0%.. ─ Run: sleep 4 && echo...
+────────────────────────────────────────────────────────────────────────────────
+⚕ ❯ msg=interrupt · /queue · /bg · /steer · Ctrl+C cancel
+────────────────────────────────────────────────────────────────────────────────
