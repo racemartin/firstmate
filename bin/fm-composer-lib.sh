@@ -311,7 +311,14 @@ fm_composer_strip_ghost() {
 # part of that union for the same reason the others are: without it a cursor
 # submit could never be acknowledged, because cursor parks its terminal cursor
 # outside its composer and the composer verdict is therefore always `unknown`.
-FM_DELIVERY_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working\.\.\.|Ctrl\+c:cancel|ctrl\+c to stop'
+# hermes's `Ctrl+C cancel` is in the union for a related reason: hermes draws
+# an extra hint row ("msg=interrupt · /queue · /bg · /steer · Ctrl+C cancel")
+# inside its composer frame for the whole turn, which the structural composer
+# scanner does not recognise as a bare glyph row, so the composer verdict
+# reads `unknown` for the entire busy period rather than `empty` or `pending`
+# (verified live, hermes 0.20.0). Delivery confirmation for hermes therefore
+# has to key on this token appearing at all, not on a return to `empty`.
+FM_DELIVERY_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working\.\.\.|Ctrl\+c:cancel|ctrl\+c to stop|Ctrl\+C[[:space:]]cancel'
 FM_DELIVERY_CLAUDE_BUSY_REGEX_DEFAULT='esc to interrupt|…[[:space:]]+\([0-9]+[smh]'
 FM_DELIVERY_CODEX_BUSY_REGEX_DEFAULT='esc to interrupt'
 FM_DELIVERY_OPENCODE_BUSY_REGEX_DEFAULT='esc interrupt'
@@ -326,6 +333,11 @@ FM_DELIVERY_GROK_BUSY_REGEX_DEFAULT='Ctrl\+c:cancel'
 # bin/fm-busy-lib.sh, never from this row.
 FM_DELIVERY_CURSOR_BUSY_REGEX_DEFAULT='ctrl\+c to stop'
 FM_DELIVERY_KIMI_BUSY_REGEX_DEFAULT='^[[:space:]]*(🌑|🌒|🌓|🌔|🌕|🌖|🌗|🌘)[[:space:]]+·[[:space:]]+'
+# hermes's busy hint row, verified live on 0.20.0: present for the entire
+# turn ("msg=interrupt · /queue · /bg · /steer · Ctrl+C cancel") and absent
+# the instant the turn ends. The TOKEN is matched, not the surrounding hint
+# text, which is not verified stable across versions.
+FM_DELIVERY_HERMES_BUSY_REGEX_DEFAULT='Ctrl\+C[[:space:]]cancel'
 
 fm_busy_lines_match() {  # [harness]
   local harness=${1:-} lines regex
@@ -341,6 +353,7 @@ fm_busy_lines_match() {  # [harness]
       grok) regex=$FM_DELIVERY_GROK_BUSY_REGEX_DEFAULT ;;
       kimi) regex=$FM_DELIVERY_KIMI_BUSY_REGEX_DEFAULT ;;
       cursor) regex=$FM_DELIVERY_CURSOR_BUSY_REGEX_DEFAULT ;;
+      hermes) regex=$FM_DELIVERY_HERMES_BUSY_REGEX_DEFAULT ;;
       '') regex=$FM_DELIVERY_BUSY_REGEX_DEFAULT ;;
       *)
         # A supplied harness must never borrow another harness's signature.

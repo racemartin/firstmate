@@ -172,6 +172,37 @@ for decoy in musescore amuse muse-binary muse-bind; do
 done
 pass "tmux liveness: unrelated muse-containing command names stay ambiguous"
 
+# --- hermes: the kernel comm carries identity, tmux's own field does not ----
+# Hermes Agent runs as `<venv>/bin/python <install>/hermes ...` and renames its
+# own kernel process name to the literal value `hermes` (verified live via
+# /proc/<pid>/comm on Hermes Agent 0.20.0), a process self-rename via prctl
+# PR_SET_NAME - the same mechanism Python's `setproctitle` package uses on
+# Linux - rather than an argv[0] or exe-path change. tmux's OWN
+# #{pane_current_command} does NOT track that rename: it reported the generic
+# `python` on the same live pane, which is exactly the trap Cursor's bare
+# `node` falls into and MUST classify neither agent nor a live shell on its
+# own. This reproduces that exact divergence with a real process rather than
+# asserting it from a symlink, because the defect is specifically a POST-EXEC
+# self-rename, which a symlinked name can never model.
+if command -v python3 >/dev/null 2>&1; then
+  cat > "$LAB/hermes_rename.py" <<'PY'
+import ctypes
+import time
+
+PR_SET_NAME = 15
+libc = ctypes.CDLL(None, use_errno=True)
+libc.prctl(PR_SET_NAME, b"hermes", 0, 0, 0)
+time.sleep(900)
+PY
+  new_window hermes python3 "$LAB/hermes_rename.py"
+  wait_for_state "$SESSION:hermes" alive \
+    || fail "a process whose kernel comm is renamed to 'hermes' must classify alive"
+  assert_sources_disagree "$SESSION:hermes" "hermes comm self-rename under a generic python argv0"
+  pass "tmux liveness: hermes's renamed kernel comm classifies alive even though tmux's own field reports the generic python interpreter name"
+else
+  echo "skip: no python3, so the hermes comm-self-rename divergence case cannot run"
+fi
+
 # --- a version name blinds one source ---------------------------------------
 # Giving a genuine harness-named executable the version-string argv[0] that
 # Claude Code 2.1.220 reports drives the two sources apart on both supported

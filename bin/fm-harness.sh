@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Detect the agent harness this process tree runs on.
-# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|muse|unknown
+# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|muse|hermes|unknown
 #        fm-harness.sh crew             print the effective CREWMATE harness
 #                                        (config/crew-harness; "default" resolves to own)
 #        fm-harness.sh secondmate       print the harness the PRIMARY uses to launch
@@ -34,7 +34,7 @@ detect_own() {
   # Layer 1: environment markers for verified harnesses.
   # Keep marker detection before ancestry detection as an explicit precedence rule.
   # Claude, Pi, Grok, and Cursor set verified markers of their own; codex,
-  # opencode, Kimi, and Muse are markerless, so a foreign marker retained in a terminal
+  # opencode, Kimi, Muse, and Hermes are markerless, so a foreign marker retained in a terminal
   # multiplexer's stored environment can silently misidentify one of them before
   # ancestry is consulted. This is a precedence hazard, not evidence that
   # CLAUDECODE inheritance into a kimi child was observed; it was not observed.
@@ -72,6 +72,9 @@ detect_own() {
   # by ancestry alone below. Do NOT promote MUSE_CURRENT_SESSION_LOG to a marker
   # without verifying it reaches children AND that it cannot survive in a
   # multiplexer's stored environment, which is the precedence hazard above.
+  # Hermes Agent (verified 0.20.0) also sets no env var of its own on its
+  # process or its child/tool processes (checked live against the launched
+  # pane's /proc/<pid>/environ), so it too is detected by ancestry alone.
   # Layer 2: walk the parent chain and match the command name.
   local pid=$$ comm args argv0
   for _ in 1 2 3 4 5 6 7 8; do
@@ -87,6 +90,13 @@ detect_own() {
       *opencode*) echo opencode; return ;;
       *grok*) echo grok; return ;;
       kimi) echo kimi; return ;;
+      # Hermes Agent runs as `<venv>/bin/python <install>/hermes ...`, but the
+      # process renames itself (verified live via /proc/<pid>/comm on hermes
+      # 0.20.0) so `ps -o comm=` reports the exact value `hermes` rather than
+      # `python` - matched here directly, with no glob needed and no python*
+      # fallback reached, unlike codex/opencode/grok's script-in-args probe
+      # below which only fires when comm itself stayed a bare interpreter name.
+      hermes) echo hermes; return ;;
       # muse's installed launcher ~/.local/bin/muse execs ~/.local/bin/muse-bin-<version>
       # (verified in the published launcher, muse 0.1.0-R708.1), so the live process
       # name carries the version and CHANGES on every auto-update. Match the stable

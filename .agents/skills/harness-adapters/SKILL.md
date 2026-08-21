@@ -3,7 +3,7 @@ name: harness-adapters
 description: >-
   Agent-only reference for firstmate harness operations.
   Use before spawning or recovering a crewmate or secondmate, handling a trust dialog, sending a harness-specific skill invocation, interrupting or exiting an agent, resuming an exited agent, or verifying a new harness adapter.
-  Contains verified facts for claude, codex, opencode, pi, pi-signed, grok, kimi, cursor, and muse.
+  Contains verified facts for claude, codex, opencode, pi, pi-signed, grok, kimi, cursor, muse, and hermes.
 user-invocable: false
 metadata:
   internal: true
@@ -133,6 +133,7 @@ The supported launch-profile flags below are verified locally; each row records 
 | kimi | `--model <model>` | none | Verified 2026-07-25 on Kimi Code CLI 0.29.1. |
 | cursor | `--model <model>` | none | Verified 2026-08-11 on Cursor Agent CLI 2026.08.11-e8db854. No effort flag exists, so firstmate records the requested effort in task metadata and omits it from the launch. Validate ids against `cursor-agent --list-models` rather than assuming a low/medium/high family: the live catalog carries only `-high` Grok ids. |
 | muse | `--model <model>` | `--reasoning-effort <low\|medium\|high\|xhigh>`, and `ultra` only for an explicit `max` | Verified 2026-08-05 on Muse Code 0.1.0-R708.1. The flag accepts `none\|minimal\|low\|medium\|high\|xhigh\|ultra` and defaults to `high`. `ultra` is muse's max-class level, so it is reachable only through an explicit captain `max`, never from the generic fallback; `none` and `minimal` sit below the shared vocabulary and stay unreachable. |
+| hermes | `--model <model>` | `--reasoning <low\|medium\|high\|xhigh\|max>` | Verified 2026-08-20 on Hermes Agent 0.20.0. `--reasoning` also accepts `none`, `minimal`, and `ultra`, both below and above firstmate's shared vocabulary, so both stay unreachable from this axis the same way muse's `none`/`minimal` do; unlike muse, hermes has its own literal `max`, so firstmate's `max` needs no remapping. The CLI does NOT validate the value client-side: an invalid `--reasoning` string passed straight through to the same provider-level 404 a genuinely invalid `--model` produced, so effect depends entirely on whether the selected model honors reasoning effort. |
 
 The concrete `harness` field owns adapter identity independently of the model provider: `harness=pi` with `model=xai/grok-*` is Pi using xAI, not `harness=grok`, and does not require Grok CLI login; `harness=grok` remains the standalone Grok Build CLI adapter.
 Likewise, `harness=cursor` with `model=cursor-grok-4.5-*` is Cursor Agent CLI routing a Grok model, not the xAI Grok Build `grok` harness.
@@ -152,6 +153,7 @@ Use the discovery surface in the current authenticated environment because suppo
 | grok | Run `grok models`, which lists the models available to the current Grok installation and account. |
 | kimi | Run `kimi provider list --json`, which lists the current provider and model configuration. |
 | cursor | Run `cursor-agent --list-models` (or the legacy `agent --list-models`), which lists the ids available to the current Cursor account. `cursor` is not the CLI name. |
+| hermes | No non-interactive listing command exists. `hermes model` opens an interactive picker (TTY only) that also refreshes `~/.hermes/cache/model_catalog.json`; that cache file lists every provider/model id the current authenticated account can reach and is the practical discovery surface between picker runs. |
 
 For an unfamiliar harness or model namespace, establish support and provider identity from that harness's authoritative CLI help, model listing, or current documentation rather than guessing from a name or prefix.
 A listing that reaches the account and does not contain the model is concrete evidence the model is unsupported: block that candidate and quote the result.
@@ -173,6 +175,7 @@ Natural language is acceptable if uncertain.
 - grok: `/<skill>`, for example `/no-mistakes` (same form as claude). Verified end to end: grok discovers the user-level `no-mistakes` skill, `/no-mistakes` invokes it, and grok drives a real `no-mistakes axi run`. Like codex's `$`/`/` popups, typing `/<skill>` opens grok's slash-autocomplete, so a too-fast Enter selects the popup entry instead of sending, and for an argument-taking command (like `/no-mistakes`'s optional task-first argument) that first Enter only expands the popup selection into an argument-hint placeholder rather than submitting - a genuine second Enter is required (see the grok section below for the 2026-07-03 incident and fix). `fm_tmux_submit_core`'s retried Enter (used by `fm-send` on the tmux backend) handles this through the shared structural composer classifier; the herdr backend needed a dedicated fix (`fm_backend_herdr_composer_state`, docs/herdr-backend.md) because its prior delta-based verification false-positived on that same popup-close content change.
 - kimi: `/<skill>`, for example `/no-mistakes`.
 - cursor: `/<skill>`, for example `/no-mistakes`. Cursor discovers firstmate's user-level skills. Its slash popup swallows the first Enter, so a genuine second Enter submits; the shared submit retry handles it.
+- hermes: `/<skill>`, for example `/no-mistakes`. Verified live (0.20.0): typing `/no-mistakes` opened an autocomplete popup showing the skill's own bundled description ("Use to turn agent 'done' into a clean PR via gh CL..."), confirming hermes discovers firstmate's user-level skills the same way claude/grok/cursor/kimi do, alongside its own separate `hermes skills` marketplace ecosystem (skills.sh, ClawHub, GitHub registries - an unrelated, proprietary install-based system, not this one). Unlike codex/grok/cursor, hermes's slash popup does NOT swallow the first Enter: a single Enter submitted cleanly in every observed case (`/help` verified end to end), so no popup-settle handling was added to `fm-send` for it.
 
 ## Submission acknowledgement hazards
 
@@ -536,3 +539,70 @@ A teardown refusal naming muse scratch is therefore correct behavior: inspect it
 muse is a day-0 `0.1.0` beta whose launcher polls a release channel hourly and can replace the running binary underneath the fleet, changing the process name with it.
 The captain accepted that risk, so firstmate does NOT set `MUSE_NO_AUTO_UPDATE=1`; a fleet that later wants stability can set it in the launch environment without any adapter change.
 Its plugin/hook engine reports `plugins are not available in this build` unless `MUSE_EXPERIMENTAL_PLUGINS=on`, which is why the busy source reads the session log instead of installing a hook.
+
+## hermes (VERIFIED CREWMATE/SCOUT ONLY, 2026-08-20, Hermes Agent 0.20.0 (2026.8.3))
+
+Hermes Agent is a Python/OpenAI-SDK-based agent CLI (`hermes`, installed as a wrapper execing `<install>/venv/bin/python <install>/hermes`).
+Like muse, it is verified as a CREWMATE and SCOUT adapter only: this verification investigated launch mechanics, composer shape, and busy-state, but did not investigate or build a primary watcher/turn-end supervision protocol, so `bin/fm-spawn.sh` refuses `--secondmate` on it and there is no `docs/supervision-protocols/hermes.md`.
+
+| Fact | Value |
+|---|---|
+| Binary | `hermes` on `PATH` (a wrapper script execing the venv Python interpreter against the installed `hermes` entry point). No PATH-probing resolver is used in the launch template - unlike Kimi's `resolve_kimi_binary`, the template calls the bare command name directly, the same shape as grok and muse. |
+| Launch | `hermes chat --yolo --accept-hooks`, bare (no positional prompt): `chat`'s `-q`/`--query` flag is documented as single-query non-interactive mode, not a supervised session starter, so like Kimi it launches bare and receives only an absolute brief pointer after a TUI readiness gate. **The readiness gate must wait for the composer itself, not the "Welcome to Hermes Agent!" banner text**: frame-by-frame captures at a 0.3s interval showed the banner renders roughly 1.2s BEFORE the composer/status-bar frame does, and a pointer typed during that window is silently lost - it lands as stray scrollback text, Enter submits nothing, and no session row is ever written to state.db. This is a distinct failure mode from Kimi's own first-Enter hazard (a swallowed Enter, covered by the shared submit core's retry) and was caught by the live e2e guard before landing in `fm-spawn.sh`. |
+| Models | `-m`/`--model <model>`, verified genuinely wired: an invalid model name returned a clean catalog-backed 404 ("not found... in our configuration or OpenRouter catalog"), and a real but unaffordable model (`anthropic/claude-sonnet-5` via the Nous Portal gateway) returned a distinct, real billing 404 ("requires available credits"). No non-interactive listing command exists; see the model-support-discovery table above. |
+| Busy state | Its own shared SQLite database at `${HERMES_HOME:-$HOME/.hermes}/state.db` (WAL journal mode), folded per-session by `bin/fm-busy-lib.sh`. See "Shared state.db busy source" below. |
+| Exit command | `/exit` (alias `/quit`); prints a session summary (id, title, duration, message count) and returns to a bare shell. |
+| Interrupt | Single Ctrl+C. Escape does NOT interrupt (verified: a mid-tool-call Escape left the turn running unchanged), the same non-interrupting Escape behavior as grok. Ctrl+C during a running tool call cleanly terminated it (observed exit code 130) and returned the composer to idle immediately - no clear key needed, unlike muse. Ctrl+C on an idle composer with typed-but-unsubmitted text clears the line (ordinary readline-style behavior), which is also how the `/no-mistakes` autocomplete popup was dismissed without invoking it during verification. |
+| Skill invocation | `/<skill>`, for example `/no-mistakes`; see "no-mistakes skill invocation" above. |
+| Autonomy | `--yolo` ("Bypass all dangerous command approval prompts"), confirmed live: the banner showed "⚠ YOLO mode - all approval prompts bypassed" and a shell tool call (`sleep N && echo ...`) ran with no confirmation prompt. `--accept-hooks` additionally auto-approves any unseen shell hook declared in `config.yaml`; this worktree declares none, so it was defensive rather than load-bearing in this verification. |
+| Trust dialog | None observed, even in a brand-new, never-before-seen directory (a fresh empty git repo). Unlike claude/codex/pi/grok/muse/cursor, there is no first-run workspace/directory trust gate for `fm-spawn` to handle. |
+| Effort | `--reasoning <level>`; see the launch-profile-axes table above. |
+| Composer | A glyph-only frame: a bare `❯` (U+276F, the SAME glyph claude already uses) on its own row, bounded above and below by a plain horizontal rule line (no side/vertical borders). No idle placeholder or ghost text was observed - an empty composer is truly empty. `❯` was already in the shared classifier's `FM_COMPOSER_AGENT_PROMPT_GLYPHS`, and the structural box scan already recognizes the rule-only top/bottom framing, so `fm_backend_composer_state` reads `empty` and `pending` correctly with NO changes to `bin/fm-composer-lib.sh`'s glyph or shape tables - verified live against a real pane for both states. |
+| Environment marker | None on the process itself or its child/tool processes (checked directly against `/proc/<pid>/environ` for a live launched pane). Detection is process ancestry: hermes renames its own kernel process name (confirmed via `/proc/<pid>/comm`) to the exact value `hermes`, even though it runs as a Python script - see "Process identity: python vs hermes" below. |
+
+### Process identity: python vs hermes
+
+Hermes's `argv[0]` is the venv's own Python interpreter path, so tmux's `#{pane_current_command}` (which reads argv[0]'s basename) reports the generic `python` - a signal far too generic to mean "agent alive" on its own, the identical trap Cursor's bare `node` falls into.
+Unlike Cursor, though, hermes's OWN kernel process name is NOT generic: `/proc/<pid>/comm` and `ps -o comm=` both report the exact renamed value `hermes` (verified live, matching neither argv[0] nor the resolved `exe` symlink, which itself points at a `uv`-managed `python3.11`, a third distinct value).
+`bin/backends/tmux.sh`'s `fm_backend_tmux_agent_state` already checks the pty foreground process group's `ps -o comm=` value BEFORE it ever reads `#{pane_current_command}`, so adding `hermes` to `fm_backend_tmux_classify_process_name`'s agent-name pattern was sufficient - no structural fallback like Cursor's `fm-cursor-lib.sh` was needed.
+`bin/fm-harness.sh`'s own ancestry walk uses the same `ps -o comm=` primitive and was given the same direct `hermes` case.
+
+### Shared state.db busy source
+
+Hermes persists EVERY session's turn history into one shared SQLite database rather than a per-session file like muse or cursor.
+`sessions.cwd` records the launch directory and `messages.session_id` scopes every row, so `bin/fm-busy-lib.sh` folds a pane by resolving its own session_id (`fm_busy_hermes_session_id`, requiring a UNIQUE session matching this workspace after excluding every session the sidecar recorded as already existing before launch - the same uniqueness reasoning muse and cursor already use) and then folding `messages` for that id (`fm_busy_hermes_turn_state`).
+Verified live turn shape (hermes 0.20.0, session `20260820_151618_e5dc91`):
+
+```
+role=user                                    <- turn opens
+role=assistant finish_reason=tool_calls      <- tool call requested (still open)
+role=tool                                    <- tool result (still open)
+role=assistant finish_reason=stop            <- normal completion (closes)
+```
+
+A Ctrl+C interrupt was also verified live: it inserts `role=tool` with content `[Command interrupted]` followed by `role=assistant` whose `finish_reason` is **NULL**, not `"stop"`.
+The fold therefore treats ANY trailing assistant row without `finish_reason=tool_calls` as closed - "closed unless a continuation is pending" - rather than keying specifically on `"stop"`; keying on `"stop"` alone would have left every interrupted turn reading busy forever.
+A resolved session with zero messages (no turn ever submitted) reports `none`, which the classifier treats as `unknown` rather than `idle`, the same "unconfirmed state is never assumed idle" convention muse already uses for its own "no run yet" case.
+The query runs via `python3`'s stdlib `sqlite3` module opened `mode=ro` (read-only, never touching the live database), guarded behind `command -v python3` with resolution failing (never guessing) when the interpreter is absent - `python3` is already an existing, if optional, firstmate dependency (`fm-kimi-turnend-hook.sh`, `fm-ensure-agents-md.sh`), and it is additionally guaranteed present on any host that can run hermes at all, since hermes itself requires it.
+Nothing is armed and no record is ever seeded, the same PULL-source reasoning as muse and cursor: hermes writes this database on its own with no firstmate hook or plugin involved.
+
+### Credentials
+
+`hermes status` and `hermes doctor` report authentication state without side effects.
+This verification ran against an environment already authenticated via Nous Portal (`hermes auth`), so no login flow was exercised; per the harness-adapters procedure, an unauthenticated environment should stop and escalate a credential need rather than attempting to authenticate.
+`hermes status` also reports the active model/provider and a full per-provider API-key inventory, useful for a future credential-preflight check analogous to muse's `muse_credential_present`.
+
+### Delivery confirmation and the busy hint row
+
+Hermes draws an extra hint row inside its composer frame for the entire duration of a turn (`msg=interrupt · /queue · /bg · /steer · Ctrl+C cancel`), which the structural composer scanner does not recognize as a bare glyph row, so `fm_backend_composer_state` reads `unknown` for the whole busy period rather than `empty` or `pending` (verified live).
+This does not affect the busy-state CONTRACT above (that comes from the state.db fold, never from rendered text), but it does affect submission DELIVERY confirmation, which is a separate rendered-footer check owned by `bin/fm-composer-lib.sh`.
+`FM_DELIVERY_HERMES_BUSY_REGEX_DEFAULT` (`Ctrl\+C cancel`) was added to that file's per-harness delivery-token table and to the harness-less union default, the same treatment cursor's `ctrl+c to stop` already has and for the same reason: without it, a submit landing during a still-running turn could never be positively acknowledged.
+`fm-spawn.sh`'s `hermes_delivery_is_confirmed` checks this busy token FIRST (the common case - a real model call rarely finishes before the next poll), falling back to an echoed `●`-prefixed transcript line plus a growing `N/<window>` context-token counter (replacing the pre-first-turn `ctx --` baseline) for the rare case a turn already finished by the time it polls.
+
+### AGENTS.md auto-injection
+
+Hermes auto-injects `AGENTS.md` from its launch directory by default (the same class of behavior `--ignore-rules` would disable), confirmed live and unprompted: without any instruction to do so, a hermes pane launched inside this repo greeted the operator as "captain" and signed a routine acknowledgement "Captain, shipshape." - exact phrasing from this project's own `AGENTS.md` section 9 - proving it read and followed the project's rules with no special pointer file needed, the same zero-configuration compatibility claude/codex/grok/cursor/kimi already have via `AGENTS.md`/`CLAUDE.md`.
+
+**Caveat, verified live spawning a real crewmate against this firstmate repo's own `AGENTS.md`:** hermes enforces a `context_file_max_chars` limit (default ceiling observed as 62914) and TRUNCATES an oversized context file rather than refusing or chunking it, surfaced as a loud inline warning ("Context file AGENTS.md TRUNCATED: 67782 chars exceeds limit of 62914 - trim the file, pin a larger context_file_max_chars, or use a larger-context model!"). This repo's own `AGENTS.md` (over 900 lines) already exceeds that default, so a hermes crewmate spawned here silently loses the tail of its own operating instructions unless `context_file_max_chars` is raised in `config.yaml` or a larger-context model is selected. No other verified adapter is known to hard-truncate `AGENTS.md` this way. This is a real, unresolved gap for firstmate-repo hermes crewmates specifically (see the `needs-decision:` line in this task's report).
+
+A separate, benign warning was also observed and should not be mistaken for a real failure: "Auxiliary title generation failed: HTTP 404: Model '~openai/gpt-mini-latest' requires available credits" - a secondary feature (auto-titling the session for display) tried a different, unaffordable model and failed without affecting the main turn.

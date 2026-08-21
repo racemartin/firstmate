@@ -80,6 +80,11 @@ alive
 On macOS the pane command reflected the rewritable title while the full install path could survive in `ps -o comm=`; in the Linux portable regression those roles reversed for the version-named native executable, with the identifying path retained in argv[0].
 The classifier therefore accepts a harness basename first, then an exact harness path component in the full executable path, then the same component in argv[0], without depending on which field carries it on a given platform.
 
+The crewmate/scout-only Hermes Agent 0.20.0 adapter was verified separately on 2026-08-20.
+Its kernel process self-renames to the literal `hermes` (confirmed live via `/proc/<pid>/comm`) even though both `#{pane_current_command}` and argv[0] report only the generic `python` of its venv interpreter, so the foreground `ps -o comm=` source alone carries the `alive` verdict.
+`tests/fm-tmux-agent-liveness.test.sh` pins that exact self-rename divergence with a real reparented process and no hermes installed.
+[`.agents/skills/harness-adapters/SKILL.md`](../../.agents/skills/harness-adapters/SKILL.md#process-identity-python-vs-hermes) owns the launch and process-identity evidence for that verification.
+
 The portable regression is CI-enforced, while the real-harness drift guard is opt-in under the policy in `.agents/skills/firstmate-coding-guidelines/SKILL.md`.
 Run the live guard after any harness upgrade and before trusting or refreshing the table above:
 
@@ -171,7 +176,7 @@ ok - fm-teardown: dedicated-socket invalid cleanup preserves target/control and 
 The dedicated tmux cell removed ambient tmux variables, required a socket-bound wrapper, kept one target and one independent control window, and proved the wrapper was not called for invalid metadata or a direct empty target.
 Valid cleanup removed only the exact task-bound target and left the control window live.
 The metadata-only validation covers tmux, Herdr, Zellij, Orca, and cmux before backend dispatch.
-Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, and Muse share that backend cleanup boundary; their harness-specific hook files, tokens, transcript bindings, and session-log sidecars are cleaned only after it, so no harness needs a separate endpoint parser.
+Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cursor, Muse, and Hermes share that backend cleanup boundary; their harness-specific hook files, tokens, transcript bindings, and session-log sidecars are cleaned only after it, so no harness needs a separate endpoint parser.
 
 ## Composer classification matrix
 
