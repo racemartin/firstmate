@@ -177,6 +177,12 @@
 # resolver because `cursor` is not the CLI name. A cursor SECONDMATE instead runs
 # the tracked project-scope .cursor/hooks.json in its own home, whose stop-hook
 # park owns that home's supervision (docs/supervision-protocols/cursor.md).
+# hermes installs no hook either and has no plugin engine at all, so it writes
+# state/<id>.hermes-session to bind the pane to a session id resolved from
+# hermes's own shared ${HERMES_HOME:-$HOME/.hermes}/state.db (bin/fm-busy-lib.sh);
+# hermes is crewmate/scout only and is refused for --secondmate because this
+# verification did not investigate or build a primary turn-end supervision
+# protocol for it (no docs/supervision-protocols/hermes.md).
 # On success prints: spawned <id> harness=<name> kind=<ship|scout|secondmate> [mode=<mode> yolo=<on|off>] window=<backend-target> worktree=<path>
 # A ship task records the explicit mode/yolo it was passed; a secondmate spawn records
 # mode=secondmate, yolo=off, home=, and projects=; a scout records neither, and both the
